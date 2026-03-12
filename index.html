@@ -1,0 +1,454 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RADAR: Grounding Robot Generalization in Training Data via Retrieval-Augmented VLMs</title>
+  <meta name="description" content="RADAR — a scalable framework for characterizing how robot policy evaluation scenarios represent generalization from training data, using VLA embeddings and VLM analysis.">
+  <link rel="stylesheet" href="static/style.css">
+  <!-- KaTeX -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+    onload="renderMathInElement(document.body, {
+      delimiters: [
+        {left: '$$', right: '$$', display: true},
+        {left: '$', right: '$', display: false}
+      ]
+    })"></script>
+</head>
+<body>
+
+<!-- ─── Nav ───────────────────────────────────────────────────── -->
+<nav class="nav">
+  <div class="nav-inner">
+    <span class="nav-brand">RADAR</span>
+    <div class="nav-links">
+      <a href="#abstract">Abstract</a>
+      <a href="#method">Method</a>
+      <a href="#experiments">Results</a>
+      <a href="#large-scale">Case Study</a>
+      <a href="#demo">Demo</a>
+    </div>
+  </div>
+</nav>
+
+<!-- ─── Hero ──────────────────────────────────────────────────── -->
+<section class="hero">
+  <div class="container">
+    <h1 class="title">
+      <span style="display:block">Grounding Robot Generalization in Training Data</span>
+      <span style="display:block">via Retrieval-Augmented VLMs</span>
+    </h1>
+
+    <div class="authors">
+      <a>Jensen Gao</a><sup>1,2</sup>,&nbsp;
+      <a href="https://dorsa.fyi">Dorsa Sadigh</a><sup>1</sup>,&nbsp;
+      <a href="https://shhuang.github.io">Sandy Huang</a><sup>2</sup>,&nbsp;
+      <a href="https://robodhruv.github.io">Dhruv Shah</a><sup>2,3</sup>
+    </div>
+    <div class="affiliations">
+      <sup>1</sup>Stanford University &nbsp;&nbsp;
+      <sup>2</sup>Google DeepMind &nbsp;&nbsp;
+      <sup>3</sup>Princeton University
+    </div>
+
+    <div class="hero-links">
+      <a href="#" class="btn btn-primary">
+        <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z"/></svg>
+        arXiv
+      </a>
+      <a href="#demo" class="btn btn-secondary">
+        <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.348a1.125 1.125 0 010 1.971l-11.54 6.347a1.125 1.125 0 01-1.667-.985V5.653z"/></svg>
+        Demo
+      </a>
+    </div>
+  </div>
+</section>
+
+<!-- ─── Abstract ──────────────────────────────────────────────── -->
+<section id="abstract" class="section">
+  <div class="container narrow">
+    <div class="section-label">Abstract</div>
+    <p>
+      Recent work on robot manipulation has advanced policy generalization to novel scenarios.
+      However, it is often difficult to characterize how different evaluation settings actually represent
+      generalization from the training distribution of a given policy. Towards more precise evaluation
+      of generalization in robotics, we propose <strong>RADAR</strong>, a scalable framework for directly
+      comparing test-time evaluation tasks to policy training data, to determine what form of policy
+      generalization is required. RADAR consists of a two-stage pipeline: first, retrieval using
+      generalist policy embeddings identifies which training examples are relevant for a given
+      evaluation task. Next, vision-language models (VLMs) analyze the evaluation task against the
+      retrieved data, outputting interpretable analysis on how they compare along a variety of axes, and
+      an overall classification of what type of policy generalization is required. Through controlled
+      experiments, we demonstrate that VLMs are effective at analyzing data for generalization, and that
+      our retrieval step effectively identifies examples needed to make accurate classifications with
+      respect to the training data. Furthermore, we scale RADAR to large-scale datasets, where we observe
+      agreement with human-defined benchmark conditions from prior work.
+    </p>
+  </div>
+</section>
+
+<!-- ─── Method ────────────────────────────────────────────────── -->
+<section id="method" class="section">
+  <div class="container">
+    <div class="section-label">Method</div>
+    <h2>The RADAR Framework</h2>
+    <p class="section-intro">
+      RADAR determines what form of generalization a robot policy requires at evaluation time
+      by comparing evaluation scenarios directly to training data — using VLA embeddings for retrieval
+      and a VLM for interpretable analysis.
+    </p>
+
+    <figure>
+      <img src="figures/radar_main_fig.png" alt="RADAR method overview">
+      <figcaption>
+        <strong>RADAR overview.</strong> Given an evaluation scenario $\tau^\text{test}$ and a training
+        dataset $\mathcal{D}$, RADAR first retrieves a subset $\mathcal{D}_\text{retrieval}$ using
+        embeddings from a generalist VLA policy. A VLM then analyzes the retrieved examples against
+        the evaluation scenario, outputting per-axis descriptions and an overall classification:
+        <strong>in-distribution</strong>, <strong>visual generalization</strong>, or
+        <strong>behavioral generalization</strong>.
+      </figcaption>
+    </figure>
+
+    <div class="two-col">
+      <div>
+        <h3>Stage 1 — Retrieval via VLA Embeddings</h3>
+        <p>
+          To scale to large datasets, RADAR first uses embedding-based retrieval to identify the $k$
+          nearest neighbors of the evaluation scenario $\tau^\text{test}$ in the training data $\mathcal{D}$.
+          We propose using internal representations from generalist vision-language-action (VLA) policies
+          as embeddings.
+        </p>
+        <p style="margin-top:12px">
+          VLA embeddings inherit two key properties: <em>visual and semantic invariance</em> from
+          VLM pretraining, and <em>behavioral sensitivity</em>
+          from large-scale robot data training.
+          These properties are important in our framework to identify examples needed for accurate downstream
+          analysis (see paper for details).
+        </p>
+      </div>
+      <div>
+        <h3>Stage 2 — VLM Analysis of Generalization</h3>
+        <p>
+          Given $\mathcal{D}_\text{retrieval}$, a VLM analyzes each retrieved example against
+          $\tau^\text{test}$ along seven generalization axes drawn from the <a href="https://stargen-taxonomy.github.io" target="_blank">$\bigstar$-Gen taxonomy</a>:
+          Image Augmentations, Visual Task Object, Visual Scene, Object Poses, Morphed Objects,
+          New Object, and Interacting Scene.
+        </p>
+        <p style="margin-top:12px">
+          For each retrieved example, the VLM predicts whether each axis is in-distribution and
+          classifies the example as <strong>same</strong>, a <strong>visual</strong> perturbation,
+          or a <strong>behavioral</strong> perturbation. These predictions are aggregated to give a
+          final classification: <strong>in-distribution</strong>, <strong>visual generalization</strong>,
+          or <strong>behavioral generalization</strong>.
+        </p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ─── Experiments ────────────────────────────────────────────── -->
+<section id="experiments" class="section section-alt">
+  <div class="container">
+    <div class="section-label">Evaluation</div>
+    <h2>Controlled Experiments</h2>
+    <p class="section-intro">
+      We evaluate RADAR on three task families on the ALOHA 2 platform, with over 2,300 annotated
+      task variations that are <em>unseen</em> by the VLAs whose embeddings we use.
+    </p>
+
+    <!-- Task examples -->
+    <h3>Task Families</h3>
+    <figure>
+      <img src="figures/task_examples.png" alt="Task family examples">
+      <figcaption>
+        <strong>Three task families</strong> used in controlled experiments: <em>Pick-and-Place</em>,
+        <em>Unzip Lunchbag</em>, and <em>Fold Dress</em>. For each task family, we provide an example
+         base task instance (left) and variations across different generalization axes (right).
+      </figcaption>
+    </figure>
+
+    <!-- Retrieval -->
+    <h3 style="margin-top:32px">Retrieval Performance</h3>
+    <p style="color:var(--text-secondary);margin-bottom:24px;font-size:0.97rem">
+      We evaluate how recall of relevant training examples scales with retrieval set size. We compare VLA-based embeddings
+      ($\pi_0$, $\pi_{0.5}$, Gemini Robotics On-Device/GROD) against baselines that do not use robot data (PaliGemma 2, SigLIP 2, DINOv3).
+    </p>
+
+    <div class="figure-row">
+      <figure>
+        <img src="figures/in-dist_2048.png" alt="In-distribution retrieval recall">
+        <figcaption>
+          <strong>In-distribution recall.</strong> All VLA-based embeddings and DINOv3 achieve &gt;95%
+          recall retrieving less than 5% of the dataset.
+        </figcaption>
+      </figure>
+      <figure>
+        <img src="figures/visual_2048.png" alt="Visual generalization retrieval recall">
+        <figcaption>
+          <strong>Visual generalization recall.</strong> GROD generally performs the best, with
+          $\pi_{0.5}$ as the only other competitive model. VLA embeddings significantly outperform
+          non-behavior-aware baselines (PG2, SigLIP 2, DINOv3).
+        </figcaption>
+      </figure>
+    </div>
+
+    <h3>Embedding Distance Structure</h3>
+    <p style="color:var(--text-secondary);margin-bottom:20px;font-size:0.97rem">
+      VLA embeddings — especially GROD — exhibit larger distances for <strong>behavioral</strong>
+      perturbations (blue) than <strong>visual</strong> perturbations (orange), a key property
+      enabling effective retrieval. Baselines that do not use robot data lack this structure.
+    </p>
+    <figure>
+      <div class="perturb-dists-stack">
+        <img src="figures/perturb_dists_1.png" alt="Embedding distances part 1" style="width:100%">
+        <img src="figures/perturb_dists_2.png" alt="Embedding distances part 2" style="width:75.25%">
+      </div>
+      <figcaption>
+        <strong>Distribution of embedding distances</strong> induced by task perturbations across
+        different axes for <em>Pick-and-Place</em>. VLA embeddings (especially GROD) separate
+        behavioral axes (blue) from visual axes (orange) more distinctly than all other methods.
+      </figcaption>
+    </figure>
+
+    <!-- VLM Analysis -->
+    <h3 style="margin-top:32px">VLM Analysis Results</h3>
+    <p style="color:var(--text-secondary);margin-bottom:24px;font-size:0.97rem">
+      We benchmark different versions of Gemini on their ability to classify generalization when
+      comparing evaluation tasks against retrieved data.
+    </p>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th class="left">Task</th>
+            <th class="left">VLM</th>
+            <th>In-Dist Acc</th>
+            <th>Visual Acc</th>
+            <th>Behavioral Acc</th>
+            <th>Overall Acc</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr class="table-task-header"><td colspan="6" class="left"><em>Pick-and-Place</em></td></tr>
+          <tr>
+            <td></td><td class="left">Gemini 3.0 Flash</td>
+            <td>91.3</td><td>73.9</td><td>92.4</td><td>85.9</td>
+          </tr>
+          <tr>
+            <td></td><td class="left">Gemini 3.0 Pro</td>
+            <td>99.0</td><td>80.9</td><td>85.6</td><td>88.5</td>
+          </tr>
+          <tr>
+            <td></td><td class="left">Gemini 3.1 Pro</td>
+            <td>94.9</td><td>82.7</td><td>100.0</td><td><strong>92.5</strong></td>
+          </tr>
+          <tr class="table-task-header"><td colspan="6" class="left"><em>Unzip Lunchbag</em></td></tr>
+          <tr>
+            <td></td><td class="left">Gemini 3.0 Flash</td>
+            <td>96.0</td><td>58.7</td><td>52.0</td><td>68.9</td>
+          </tr>
+          <tr>
+            <td></td><td class="left">Gemini 3.0 Pro</td>
+            <td>100.0</td><td>29.8</td><td>4.2</td><td>44.7</td>
+          </tr>
+          <tr>
+            <td></td><td class="left">Gemini 3.1 Pro</td>
+            <td>93.8</td><td>71.4</td><td>54.0</td><td><strong>72.8</strong></td>
+          </tr>
+          <tr class="table-task-header"><td colspan="6" class="left"><em>Fold Dress</em></td></tr>
+          <tr>
+            <td></td><td class="left">Gemini 3.0 Flash</td>
+            <td>91.7</td><td>39.1</td><td>51.0</td><td><strong>60.6</strong></td>
+          </tr>
+          <tr>
+            <td></td><td class="left">Gemini 3.0 Pro</td>
+            <td>95.9</td><td>12.8</td><td>12.5</td><td>40.4</td>
+          </tr>
+          <tr>
+            <td></td><td class="left">Gemini 3.1 Pro</td>
+            <td>98.0</td><td>33.3</td><td>33.3</td><td>55.2</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="callout">
+      RADAR achieves up to 92.5% overall classification accuracy on <em>Pick-and-Place</em>.
+      Performance is lower on tasks with more subtle visual differences (<em>Unzip Lunchbag</em>,
+      <em>Fold Dress</em>), highlighting a current limitation of VLMs that improves with stronger models.
+    </div>
+
+    <figure>
+      <img src="figures/vlm_examples.png" alt="VLM success and failure examples">
+      <figcaption>
+        <strong>VLM successes (green) and failures (red)</strong> from Gemini 3.0 Flash for
+        "Object Poses" and "Morphed Objects" axes. Failure modes typically involve subtle visual
+        changes — such as a slight lunchbag rotation or minor size differences — that are challenging
+        even for state-of-the-art VLMs.
+      </figcaption>
+    </figure>
+  </div>
+</section>
+
+<!-- ─── Large Scale ────────────────────────────────────────────── -->
+<section id="large-scale" class="section">
+  <div class="container">
+    <div class="section-label">Case Study</div>
+    <h2>Large-Scale Analysis</h2>
+    <p class="section-intro">
+      We apply RADAR to two large-scale real-world datasets: Bridge V2 and a proprietary dataset of
+      over 1M ALOHA 2 demonstrations, assessing evaluation tasks from prior benchmark work.
+    </p>
+
+    <figure>
+      <img src="figures/large_scale_examples.png" alt="Large-scale RADAR examples">
+      <figcaption>
+        <strong>RADAR applied to large-scale ALOHA 2 benchmarking.</strong> For each evaluation task
+        (left), RADAR retrieves relevant training examples (middle) and a VLM provides interpretable
+        analysis with an overall classification (right). We observe agreement
+        with prior human-defined characterizations of generalization.
+      </figcaption>
+    </figure>
+
+  </div>
+</section>
+
+<!-- ─── Demo ───────────────────────────────────────────────────── -->
+<section id="demo" class="section">
+  <div class="container">
+    <div class="section-label">Interactive Demo</div>
+    <h2>Try RADAR</h2>
+    <p class="section-intro">
+      Use RADAR to analyze evaluation tasks against Bridge V2, using
+      <a href="https://cogact.github.io" target="_blank">CogACT</a> embeddings for retrieval.
+      Choose a provided task example to see retrieval results and Gemini-produced generalization analysis.
+      You can also try your own task examples by uploading an image and providing an instruction. This
+      requires the embedding model to be loaded by the server (may take some time), and a Gemini API key
+      to run Gemini analysis.
+    </p>
+
+    <div class="demo-wrapper">
+
+      <!-- Query Panel -->
+      <div class="demo-query-panel">
+        <div class="demo-tabs">
+          <button class="demo-tab active" data-tab="examples">Choose Example</button>
+          <button class="demo-tab" data-tab="upload">Upload Your Own</button>
+        </div>
+
+        <!-- Examples tab -->
+        <div id="tab-examples" class="demo-tab-content active">
+          <div id="examples-grid" class="examples-grid">
+            <div class="examples-placeholder">
+              <svg width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909M3 20.25h18M16.5 3.75a.75.75 0 11-1.5 0 .75.75 0 011.5 0z"/>
+              </svg>
+              <span>Enter a server URL to load example queries</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Upload tab -->
+        <div id="tab-upload" class="demo-tab-content">
+          <div class="upload-area" id="upload-area">
+            <input type="file" id="file-input" accept="image/*" hidden>
+            <div class="upload-placeholder" id="upload-placeholder">
+              <svg width="36" height="36" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5"/>
+              </svg>
+              <span>Drop an image or <span class="upload-link">browse</span></span>
+              <span style="font-size:0.75rem">Robot Observation Image</span>
+            </div>
+            <img id="upload-preview" style="display:none" alt="Upload preview">
+            <div class="upload-actions" id="upload-actions" style="display:none">
+              <button id="clear-upload" class="btn btn-secondary btn-sm">✕ Clear</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Instruction (shared) -->
+        <div class="instruction-row">
+          <label for="instruction-input">Task Instruction</label>
+          <input type="text" id="instruction-input"
+            placeholder='e.g., "Pick up the red cup and place it in the bowl"'>
+          <button id="retrieve-btn" class="btn btn-primary" style="margin-top:10px;width:100%" disabled>
+            Retrieve
+          </button>
+          <div id="retrieve-status"></div>
+          <div id="model-status" style="margin-top:8px;font-size:0.8rem;color:var(--text-secondary);display:none;align-items:center;gap:6px">
+            <span id="model-status-dot" style="width:8px;height:8px;border-radius:50%;background:#f59e0b;display:inline-block;flex-shrink:0"></span>
+            <span id="model-status-text">Embedding model loading…</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Settings Panel -->
+      <div class="demo-settings-panel">
+        <div class="settings-card">
+          <h3>Gemini Analysis</h3>
+          <div class="setting-row">
+            <label for="gemini-key">API Key</label>
+            <input type="password" id="gemini-key" placeholder="AIza…">
+            <div class="setting-hint">Stored only in your browser's localStorage. Never sent to any server other than Google.</div>
+          </div>
+          <div class="setting-row">
+            <label for="gemini-model">Model</label>
+            <select id="gemini-model">
+              <option value="gemini-3-flash-preview">Gemini 3.0 Flash</option>
+              <option value="gemini-3.1-pro-preview">Gemini 3.1 Pro</option>
+            </select>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Results -->
+    <div id="results-section" class="demo-results hidden">
+      <div class="demo-results-header">
+        <h3 style="margin:0">Retrieved Training Examples</h3>
+        <span id="results-count" class="results-count"></span>
+      </div>
+      <div id="results-grid" class="results-grid"></div>
+
+      <div class="analysis-trigger">
+        <p>
+          Run Gemini analysis to get a per-axis breakdown and generalization
+          classification. Pre-computed for provided examples; requires a Gemini API key for custom inputs.
+        </p>
+        <button id="analyze-btn" class="btn btn-accent" disabled>Run RADAR Analysis</button>
+      </div>
+      <div id="analyze-status"></div>
+    </div>
+
+    <!-- Analysis -->
+    <div id="analysis-section" class="analysis-section hidden">
+      <h3>Generalization Analysis</h3>
+      <div id="overall-verdict"></div>
+      <div class="analysis-examples" id="analysis-examples"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ─── Citation ──────────────────────────────────────────────── -->
+<section id="citation" class="section section-alt">
+  <div class="container narrow">
+    <div class="section-label">Citation</div>
+    <h2>BibTeX</h2>
+    <pre class="citation-block">@article{gao2026radar,
+  title   = {Grounding Robot Generalization in Training Data
+             via Retrieval-Augmented VLMs},
+  author  = {Gao, Jensen and Sadigh, Dorsa and Huang, Sandy and Shah, Dhruv},
+  journal = {arXiv preprint arXiv:},
+  year    = {2026}
+}</pre>
+  </div>
+</section>
+
+<script src="static/precomputed_data.js"></script>
+<script src="static/demo.js"></script>
+</body>
+</html>
